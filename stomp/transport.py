@@ -39,7 +39,7 @@ except ImportError:
 import exception
 import listener
 import utils
-from backward import decode, encode, get_errno, pack, NULL
+from backward import decode, encode, get_errno, pack
 
 try:
     import uuid    
@@ -59,7 +59,7 @@ class Transport(listener.Publisher):
     #
     __content_length_re = re.compile('^content-length[:]\\s*(?P<value>[0-9]+)', re.MULTILINE)
 
-    def __init__(self, 
+    def __init__(self,
                  host_and_ports=None,
                  prefer_localhost=True,
                  try_loopback_connect=True,
@@ -80,24 +80,24 @@ class Transport(listener.Publisher):
                  vhost=None
                  ):
         """
-        \param host_and_ports            
+        \param host_and_ports
             a list of (host, port) tuples.
 
         \param prefer_localhost
             if True and the local host is mentioned in the (host,
             port) tuples, try to connect to this first
 
-        \param try_loopback_connect    
+        \param try_loopback_connect
             if True and the local host is found in the host
             tuples, try connecting to it using loopback interface
             (127.0.0.1)
 
-        \param reconnect_sleep_initial 
+        \param reconnect_sleep_initial
             initial delay in seconds to wait before reattempting
             to establish a connection if connection to any of the
             hosts fails.
 
-        \param reconnect_sleep_increase 
+        \param reconnect_sleep_increase
             factor by which the sleep delay is increased after
             each connection attempt. For example, 0.5 means
             to wait 50% longer than before the previous attempt,
@@ -115,10 +115,10 @@ class Transport(listener.Publisher):
             stampeding. For example, a value of 0.1 means to wait
             an extra 0%-10% (randomly determined) of the delay
             calculated using the previous three parameters.
-                 
+
         \param reconnect_attempts_max
             maximum attempts to reconnect
-                
+
         \param use_ssl
             deprecated, see Transport::set_ssl
 
@@ -144,7 +144,7 @@ class Transport(listener.Publisher):
 
         \param timeout
             the timeout value to use when connecting the stomp socket
-            
+
         \param keepalive
             some operating systems support sending the occasional heart
             beat packets to detect when a connection fails.  This
@@ -178,7 +178,7 @@ class Transport(listener.Publisher):
             for host_and_port in sorted_host_and_ports:
                 if utils.is_localhost(host_and_port) == 1:
                     port = host_and_port[1]
-                    if (not ("127.0.0.1", port) in sorted_host_and_ports 
+                    if (not ("127.0.0.1", port) in sorted_host_and_ports
                         and not ("localhost", port) in sorted_host_and_ports):
                         loopback_host_and_ports.append(("127.0.0.1", port))
 
@@ -199,7 +199,7 @@ class Transport(listener.Publisher):
         self.__reconnect_sleep_max = reconnect_sleep_max
         self.__reconnect_attempts_max = reconnect_attempts_max
         self.__timeout = timeout
-        
+
         self.socket = None
         self.__socket_semaphore = threading.BoundedSemaphore(1)
         self.current_host_and_port = None
@@ -213,7 +213,7 @@ class Transport(listener.Publisher):
         self.blocking = None
         self.connected = False
         self.connection_error = False
-        
+
         # setup SSL
         self.__ssl_params = {}
         if use_ssl:
@@ -227,10 +227,10 @@ class Transport(listener.Publisher):
 
         self.__receipts = {}
         self.__wait_on_receipt = wait_on_receipt
-        
+
         # flag used when we receive the disconnect receipt
         self.__disconnect_receipt = None
-        
+
         # function for creating threads used by the connection
         self.create_thread_fc = utils.default_create_thread
 

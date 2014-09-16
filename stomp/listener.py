@@ -174,6 +174,9 @@ class HeartbeatListener(ConnectionListener):
         self.heartbeats = heartbeats
         self.received_heartbeat = time.time()
         self.heartbeat_thread = None
+        self.__heatbeat_thread_exited_condition = threading.Condition()
+        self.__heatbeat_thread_exit_condition = threading.Condition()
+        self.__heatbeat_thread_exited = False
     
     def on_connected(self, headers, body):
         """
@@ -201,7 +204,17 @@ class HeartbeatListener(ConnectionListener):
                 self.running = True
                 if self.heartbeat_thread is None:
                     self.heartbeat_thread = utils.default_create_thread(self.__heartbeat_loop)
-                
+
+    def on_disconnected(self):
+        self.running = False
+        self.__heatbeat_thread_exit_condition.acquire()
+        self.__heatbeat_thread_exit_condition.notifyAll()
+        self.__heatbeat_thread_exit_condition.release()
+        self.__heatbeat_thread_exited_condition.acquire()
+        while not self.__heatbeat_thread_exited:
+            self.__heatbeat_thread_exited_condition.wait()
+        self.__heatbeat_thread_exited_condition.release()
+
     def on_message(self, headers, body):
         """
         Reset the last received time whenever a message is received.
@@ -227,35 +240,45 @@ class HeartbeatListener(ConnectionListener):
         """
         Main loop for sending (and monitoring received) heartbeats.
         """
-        send_time = time.time()
-        receive_time = time.time()
+        log.debug("Starting heatbeat loop")
+        try:
+            send_time = time.time()
+            receive_time = time.time()
+            self.__heatbeat_thread_exit_condition.acquire()
+            while self.running:
+                self.__heatbeat_thread_exit_condition.wait(self.sleep_time)
+                if not self.running:
+                    break
+                now = time.time()
 
-        while self.running:
-            time.sleep(self.sleep_time)
-            
-            now = time.time()
+                if now - send_time > self.send_sleep:
+                    send_time = now
+                    log.debug("Sending a heartbeat message at %s", now)
+                    try:
+                        self.transport.transmit(utils.Frame(None, {}, None))
+                    except exception.NotConnectedException:
+                        log.debug("Lost connection, unable to send heartbeat")
 
-            if now - send_time > self.send_sleep:
-                send_time = now
-                log.debug("Sending a heartbeat message at %s", now)
-                try:
-                    self.transport.transmit(utils.Frame(None, {}, None))
-                except exception.NotConnectedException:
-                    log.debug("Lost connection, unable to send heartbeat")
+                diff_receive = now - self.received_heartbeat
 
-            diff_receive = now - self.received_heartbeat
-            
-            if diff_receive > self.receive_sleep:
-                receive_time = now
-                diff_heartbeat = now - self.received_heartbeat
-                if diff_heartbeat > self.receive_sleep:
-                    # heartbeat timeout
-                    log.info("Heartbeat timeout: diff_receive=%s, diff_heartbeat=%s, time=%s, lastrec=%s", diff_receive, diff_heartbeat, now, self.received_heartbeat)
-                    self.received_heartbeat = now
-                    self.transport.disconnect_socket()
-                    self.transport.set_connected(False)
-                    for listener in self.transport.listeners.values():
-                        listener.on_heartbeat_timeout()
+                if diff_receive > self.receive_sleep:
+                    receive_time = now
+                    diff_heartbeat = now - self.received_heartbeat
+                    if diff_heartbeat > self.receive_sleep:
+                        # heartbeat timeout
+                        log.info("Heartbeat timeout: diff_receive=%s, diff_heartbeat=%s, time=%s, lastrec=%s", diff_receive, diff_heartbeat, now, self.received_heartbeat)
+                        self.received_heartbeat = now
+                        self.transport.disconnect_socket()
+                        self.transport.set_connected(False)
+                        for listener in self.transport.listeners.values():
+                            listener.on_heartbeat_timeout()
+        finally:
+            self.__heatbeat_thread_exit_condition.release()
+            self.__heatbeat_thread_exited_condition.acquire()
+            self.__heatbeat_thread_exited = True
+            self.__heatbeat_thread_exited_condition.notifyAll()
+            self.__heatbeat_thread_exited_condition.release()
+            log.debug("Heatbeat loop ended")
 
 
 class WaitingListener(ConnectionListener):
@@ -276,8 +299,33 @@ class WaitingListener(ConnectionListener):
             self.received = True
             self.condition.notify()
             self.condition.release()
+
+    def on_message(self, headers, body):
+        """
+        Notify the waiting thread.
+        """
+        self.condition.acquire()
+        self.received = True
+        self.condition.notify()
+        self.condition.release()
+
+    def on_error(self, headers, body):
+        self.condition.acquire()
+        self.received = True
+        self.condition.notify()
+        self.condition.release()
         
     def wait_on_receipt(self):
+        """
+        Wait until we receive a message receipt.
+        """
+        self.condition.acquire()
+        while not self.received:
+            self.condition.wait()
+        self.condition.release()
+        self.received = False
+
+    def wait_on_message(self):
         """
         Wait until we receive a message receipt.
         """

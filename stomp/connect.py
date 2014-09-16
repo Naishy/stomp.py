@@ -1,3 +1,4 @@
+from wstransport import *
 from transport import *
 from protocol import *
 from listener import *
@@ -142,6 +143,27 @@ class StompConnection12(BaseConnection, Protocol12):
                               reconnect_sleep_max, reconnect_attempts_max, use_ssl, ssl_key_file, ssl_cert_file,
                               ssl_ca_certs, ssl_cert_validator, wait_on_receipt, ssl_version, timeout,
                               keepalive, vhost)
+        BaseConnection.__init__(self, transport)
+        Protocol12.__init__(self, transport, heartbeats)
+
+    def disconnect(self, receipt=str(uuid.uuid4()), headers={}, **keyword_headers):
+        Protocol12.disconnect(self, receipt, headers, **keyword_headers)
+        self.transport.stop()
+
+
+class WebSocketStompConnection12(BaseConnection, Protocol12):
+    """
+    Represents a 1.2 connection (comprising transport plus 1.2 protocol class)
+    """
+    def __init__(self,
+                 url,
+                 heartbeats=(0, 0),
+                 keepalive=None):
+        """
+        \see stomp::transport::Transport.__init__
+        \see stomp::protocol::Protocol12.__init__
+        """
+        transport = WSTransport(url=url)
         BaseConnection.__init__(self, transport)
         Protocol12.__init__(self, transport, heartbeats)
 

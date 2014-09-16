@@ -47,13 +47,16 @@ def get_stompserver_host():
     return [(get_environ('STOMPSERVER_HOST') or host, int(get_environ('STOMPSERVER_PORT') or port))]
     
 
-class TestListener(StatsListener,WaitingListener):
+class TestListener(StatsListener, WaitingListener):
     def __init__(self, receipt=None):
         StatsListener.__init__(self)
         WaitingListener.__init__(self, receipt)
         self.message_list = []
         self.message_condition = threading.Condition()
         self.message_received = False
+        self.error_list = []
+        self.error_condition = threading.Condition()
+        self.error_received = False
 
     def on_message(self, headers, message):
         StatsListener.on_message(self, headers, message)
@@ -62,16 +65,34 @@ class TestListener(StatsListener,WaitingListener):
         self.message_received = True
         self.message_condition.notify()
         self.message_condition.release()
-        
+
     def wait_for_message(self):
         self.message_condition.acquire()
         while not self.message_received:
             self.message_condition.wait()
         self.message_condition.release()
         self.message_received = False
-        
+
     def get_latest_message(self):
         return self.message_list[len(self.message_list)-1]
+
+    def on_error(self, headers, message):
+        StatsListener.on_error(self, headers, message)
+        self.error_list.append((headers, message))
+        self.error_condition.acquire()
+        self.error_received = True
+        self.error_condition.notify()
+        self.error_condition.release()
+
+    def wait_for_error(self):
+        self.error_condition.acquire()
+        while not self.error_received:
+            self.error_condition.wait()
+        self.error_condition.release()
+        self.error_received = False
+
+    def get_latest_error(self):
+        return self.error_list[len(self.error_list)-1]
 
 
 class TestStompServer(object):

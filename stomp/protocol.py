@@ -264,7 +264,7 @@ class Protocol12(Protocol11):
         \param wait
             wait for the connection to complete before returning
         """
-        cmd = CMD_STOMP
+        cmd = CMD_CONNECT
         headers = utils.merge_headers([headers, keyword_headers])
         headers[HDR_ACCEPT_VERSION] = self.version
         headers[HDR_HOST] = self.transport.current_host_and_port[0]

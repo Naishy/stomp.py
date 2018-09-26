@@ -158,12 +158,13 @@ class WebSocketStompConnection12(BaseConnection, Protocol12):
     def __init__(self,
                  url,
                  heartbeats=(0, 0),
-                 keepalive=None):
+                 keepalive=None,
+                 timeout=None):
         """
         \see stomp::transport::Transport.__init__
         \see stomp::protocol::Protocol12.__init__
         """
-        transport = WSTransport(url=url)
+        transport = WSTransport(url=url, timeout=timeout)
         BaseConnection.__init__(self, transport)
         Protocol12.__init__(self, transport, heartbeats)
 

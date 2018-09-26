@@ -174,10 +174,8 @@ class HeartbeatListener(ConnectionListener):
         self.heartbeats = heartbeats
         self.received_heartbeat = time.time()
         self.heartbeat_thread = None
-        self.__heatbeat_thread_exited_condition = threading.Condition()
         self.__heatbeat_thread_exit_condition = threading.Condition()
-        self.__heatbeat_thread_exited = False
-    
+
     def on_connected(self, headers, body):
         """
         Once the connection is established, and 'heart-beat' is found in the headers, we calculate the real heartbeat numbers
@@ -207,13 +205,11 @@ class HeartbeatListener(ConnectionListener):
 
     def on_disconnected(self):
         self.running = False
-        self.__heatbeat_thread_exit_condition.acquire()
-        self.__heatbeat_thread_exit_condition.notifyAll()
-        self.__heatbeat_thread_exit_condition.release()
-        self.__heatbeat_thread_exited_condition.acquire()
-        while not self.__heatbeat_thread_exited:
-            self.__heatbeat_thread_exited_condition.wait()
-        self.__heatbeat_thread_exited_condition.release()
+        with self.__heatbeat_thread_exit_condition:
+            self.__heatbeat_thread_exit_condition.notifyAll()
+
+        if self.heartbeat_thread:
+            self.heartbeat_thread.join()
 
     def on_message(self, headers, body):
         """
@@ -240,7 +236,7 @@ class HeartbeatListener(ConnectionListener):
         """
         Main loop for sending (and monitoring received) heartbeats.
         """
-        log.debug("Starting heatbeat loop")
+        log.debug("Starting heartbeat loop")
         try:
             send_time = time.time()
             receive_time = time.time()
@@ -257,7 +253,7 @@ class HeartbeatListener(ConnectionListener):
                     try:
                         self.transport.transmit(utils.Frame(None, {}, None))
                     except exception.NotConnectedException:
-                        log.debug("Lost connection, unable to send heartbeat")
+                        log.error("Lost connection, unable to send heartbeat")
 
                 diff_receive = now - self.received_heartbeat
 
@@ -266,7 +262,7 @@ class HeartbeatListener(ConnectionListener):
                     diff_heartbeat = now - self.received_heartbeat
                     if diff_heartbeat > self.receive_sleep:
                         # heartbeat timeout
-                        log.info("Heartbeat timeout: diff_receive=%s, diff_heartbeat=%s, time=%s, lastrec=%s", diff_receive, diff_heartbeat, now, self.received_heartbeat)
+                        log.error("Heartbeat timeout: diff_receive=%s, diff_heartbeat=%s, time=%s, lastrec=%s", diff_receive, diff_heartbeat, now, self.received_heartbeat)
                         self.received_heartbeat = now
                         self.transport.disconnect_socket()
                         self.transport.set_connected(False)
@@ -274,10 +270,6 @@ class HeartbeatListener(ConnectionListener):
                             listener.on_heartbeat_timeout()
         finally:
             self.__heatbeat_thread_exit_condition.release()
-            self.__heatbeat_thread_exited_condition.acquire()
-            self.__heatbeat_thread_exited = True
-            self.__heatbeat_thread_exited_condition.notifyAll()
-            self.__heatbeat_thread_exited_condition.release()
             log.debug("Heatbeat loop ended")
 
 
@@ -300,32 +292,7 @@ class WaitingListener(ConnectionListener):
             self.condition.notify()
             self.condition.release()
 
-    def on_message(self, headers, body):
-        """
-        Notify the waiting thread.
-        """
-        self.condition.acquire()
-        self.received = True
-        self.condition.notify()
-        self.condition.release()
-
-    def on_error(self, headers, body):
-        self.condition.acquire()
-        self.received = True
-        self.condition.notify()
-        self.condition.release()
-        
     def wait_on_receipt(self):
-        """
-        Wait until we receive a message receipt.
-        """
-        self.condition.acquire()
-        while not self.received:
-            self.condition.wait()
-        self.condition.release()
-        self.received = False
-
-    def wait_on_message(self):
         """
         Wait until we receive a message receipt.
         """

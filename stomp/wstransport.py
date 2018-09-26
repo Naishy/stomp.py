@@ -1,8 +1,14 @@
+import random
+import socket
 import threading
-from urlparse import urlparse
+try:
+    from urllib.parse import urlparse
+except ImportError:
+    from urlparse import urlparse
+import math
+import time
 import websocket
 from websocket import _exceptions
-from stomp import listener
 import exception
 import listener
 from constants import *
@@ -16,13 +22,14 @@ import logging
 
 log = logging.getLogger('stomp.py')
 
+OPCODE_CLOSE  = 0x8
 
 class WSTransport(listener.Publisher):
     def __init__(self,
                  url,
-                 reconnect_sleep_initial=0.1,
-                 reconnect_sleep_increase=0.5,
-                 reconnect_sleep_jitter=0.1,
+                 reconnect_sleep_initial=10,
+                 reconnect_sleep_increase=0,
+                 reconnect_sleep_jitter=0,
                  reconnect_sleep_max=60.0,
                  reconnect_attempts_max=3,
                  wait_on_receipt=False,
@@ -222,6 +229,7 @@ class WSTransport(listener.Publisher):
         self.running = False
         if self.socket is not None:
             self.socket.close()
+            self.socket = None
         self.current_host_and_port = None
 
     def transmit(self, frame):
@@ -241,7 +249,7 @@ class WSTransport(listener.Publisher):
 
         packed_frame = pack(lines)
 
-        log.info("Sending frame %s", lines)
+        log.debug("Sending frame %s", lines)
 
         if self.socket is not None:
             try:
@@ -263,7 +271,7 @@ class WSTransport(listener.Publisher):
             if frame_type == 'message':
                 (f.headers, f.body) = self.notify('before_message', f.headers, f.body)
             self.notify(frame_type, f.headers, f.body)
-            log.info("Received frame: %r, headers=%r, body=%r", f.cmd, f.headers, f.body)
+            log.debug("Received frame: %r, headers=%r, body=%r", f.cmd, f.headers, f.body)
         else:
             log.warning("Unknown response frame type: '%s' (frame length was %d)", frame_type, len(frame_str))
 
@@ -345,19 +353,23 @@ class WSTransport(listener.Publisher):
 
                 try:
                     while self.running:
-                        frame = self.__read()
+                        frame = self.__read().decode('utf-8')
                         f = utils.parse_frame(frame)
                         self.process_frame(f, frame)
                 except _exceptions.WebSocketConnectionClosedException:
                     if self.running:
-                        self.notify('disconnected')
                         self.running = False
-                    break
+                except IndexError:
+                    logging.exception("Something bad happened - Disconnecting!")
+                    if self.running:
+                        self.running = False
                 finally:
                     try:
-                        self.socket.close()
+                        if self.socket:
+                            self.socket.close()
                     except:
                         pass  # ignore errors when attempting to close socket
+                    self.notify('disconnected')
                     self.socket = None
                     self.current_host_and_port = None
         finally:
@@ -371,11 +383,13 @@ class WSTransport(listener.Publisher):
         """
         Read the next frame(s) from the socket.
         """
-
-        result = []
+        data = None
         if self.socket:
-            result = self.socket.recv()
-        return result
+            opcode, data = self.socket.recv_data()
+            # Check the opcode for a disconnect. If so, we need to close down
+            if opcode == OPCODE_CLOSE:
+                raise _exceptions.WebSocketConnectionClosedException()
+        return data
 
     def attempt_connection(self):
         """
@@ -385,28 +399,33 @@ class WSTransport(listener.Publisher):
         sleep_exp = 1
         connect_count = 0
         while self.running and self.socket is None and connect_count < self.__reconnect_attempts_max:
-            parsed = urlparse(self.__url)
-            log.info("Attempting connection to url {0}".format(self.__url))
-            self.socket = websocket.WebSocket()
-            self.socket.connect(self.__url,
-                                timeout=self.__timeout,
-                                http_proxy_host=self.__http_proxy,
-                                http_proxy_port=self.__http_proxy_port)
-            self.current_host_and_port = [parsed.hostname, parsed.port]
+            try:
+                parsed = urlparse(self.__url)
+                log.debug("Attempting connection to url {0}".format(self.__url))
+                self.socket = websocket.WebSocket()
+                self.socket.connect(self.__url,
+                                    timeout=self.__timeout,
+                                    http_proxy_host=self.__http_proxy,
+                                    http_proxy_port=self.__http_proxy_port)
+                self.current_host_and_port = [parsed.hostname, parsed.port]
 
-            # if self.socket is None:
-            # sleep_duration = (min(self.__reconnect_sleep_max,
-            # ((self.__reconnect_sleep_initial / (1.0 + self.__reconnect_sleep_increase))
-            #                            * math.pow(1.0 + self.__reconnect_sleep_increase, sleep_exp)))
-            #                       * (1.0 + random.random() * self.__reconnect_sleep_jitter))
-            #     sleep_end = time.time() + sleep_duration
-            #     log.debug("Sleeping for %.1f seconds before attempting reconnect", sleep_duration)
-            #     while self.running and time.time() < sleep_end:
-            #         time.sleep(0.2)
-            #
-            #     if sleep_duration < self.__reconnect_sleep_max:
-            #         sleep_exp += 1
+            except socket.error:
+                self.socket = None
+                connect_count += 1
+                log.warning("Could not connect to host %s", self.__url, exc_info=1)
 
+            if self.socket is None:
+                sleep_duration = (min(self.__reconnect_sleep_max,
+                                      ((self.__reconnect_sleep_initial / (1.0 + self.__reconnect_sleep_increase))
+                                       * math.pow(1.0 + self.__reconnect_sleep_increase, sleep_exp)))
+                                  * (1.0 + random.random() * self.__reconnect_sleep_jitter))
+                sleep_end = time.time() + sleep_duration
+                log.debug("Sleeping for %.1f seconds before attempting reconnect", sleep_duration)
+                while self.running and time.time() < sleep_end:
+                    time.sleep(0.2)
+
+                if sleep_duration < self.__reconnect_sleep_max:
+                    sleep_exp += 1
         if not self.socket:
             raise exception.ConnectFailedException()
 

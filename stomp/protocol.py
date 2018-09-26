@@ -254,7 +254,7 @@ class Protocol12(Protocol11):
             headers[HDR_TRANSACTION] = transaction
         self.send_frame(CMD_NACK, headers)
 
-    def connect(self, username=None, passcode=None, wait=False, headers={}, **keyword_headers):
+    def connect(self, username=None, passcode=None, wait=False, timeout=None, headers={}, **keyword_headers):
         """
         Send a STOMP CONNECT frame. Differs from 1.0 and 1.1 versions in that the HOST header is enforced.
         \param username
@@ -281,6 +281,6 @@ class Protocol12(Protocol11):
         self.send_frame(cmd, headers)
         
         if wait:
-            self.transport.wait_for_connection()
+            self.transport.wait_for_connection(timeout)
             if self.transport.connection_error:
                 raise ConnectFailedException()

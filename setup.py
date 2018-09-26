@@ -65,6 +65,7 @@ setup(
     packages = ['stomp', 'stomp.adapter'],
     cmdclass = { 'test' : TestCommand, 'docs' : DoxygenCommand },
     scripts = ['./scripts/stomp'],
+    install_requires = ['websocket-client', ],
     classifiers = [
          'Development Status :: 5 - Production/Stable',
          'Intended Audience :: Developers',
